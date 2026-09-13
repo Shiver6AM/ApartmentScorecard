@@ -9,10 +9,16 @@ import { Checkbox, Field, FlagIcon, SelectInput, TextInput } from "./ui";
 import { TransitChips } from "./CheatSheet";
 
 type Tab = "cost" | "location" | "unit" | "amenities" | "safety";
+type ParseResponse = { ok: true; fields: Partial<Listing>; found: string[] } | { ok: false; error: string };
 
 function numOrNull(v: string): number | null {
   return v === "" ? null : Number(v);
 }
+
+const AUTOFILL_LABELS: Record<string, string> = {
+  name: "name/address", rent: "rent", price: "price", bedrooms: "bedrooms",
+  bathrooms: "bathrooms", sqft: "size",
+};
 
 export function DetailCard({ listing, isNew, workNeighborhood, weights, onSave, onDelete, onClose }: {
   listing: Listing;
@@ -26,9 +32,39 @@ export function DetailCard({ listing, isNew, workNeighborhood, weights, onSave, 
   const [draft, setDraft] = useState<Listing>(listing);
   const [tab, setTab] = useState<Tab>("cost");
   const [pendingDelete, setPendingDelete] = useState(false);
+  const [autoUrl, setAutoUrl] = useState("");
+  const [autoStatus, setAutoStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [autoMessage, setAutoMessage] = useState("");
 
   function set<K extends keyof Listing>(key: K, value: Listing[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
+  }
+
+  async function handleAutofill() {
+    const url = autoUrl.trim();
+    if (!url) return;
+    setAutoStatus("loading");
+    setAutoMessage("");
+    try {
+      const res = await fetch("/api/parse-listing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data: ParseResponse = await res.json();
+      if (data.ok) {
+        setDraft((d) => ({ ...d, ...data.fields }));
+        setAutoStatus("done");
+        const labels = data.found.map((k) => AUTOFILL_LABELS[k] || k);
+        setAutoMessage(`Pulled ${labels.join(", ")} — double-check them and fill in the rest.`);
+      } else {
+        setAutoStatus("error");
+        setAutoMessage(data.error);
+      }
+    } catch {
+      setAutoStatus("error");
+      setAutoMessage("Something went wrong reaching that page. Try again, or fill the form in by hand.");
+    }
   }
 
   const flags = isNew ? [] : allFlags(draft, workNeighborhood);
@@ -58,6 +94,27 @@ export function DetailCard({ listing, isNew, workNeighborhood, weights, onSave, 
         <button type="button" className={`btn${!isBuy ? " btn-primary" : ""}`} onClick={() => set("listingType", "rent")}>For rent</button>
         <button type="button" className={`btn${isBuy ? " btn-primary" : ""}`} onClick={() => set("listingType", "buy")}>For sale</button>
       </div>
+
+      {isNew && (
+        <div className="autofill-box">
+          <label htmlFor="f-autofill-url">Paste a realtor.ca or rentals.ca link to auto-fill what it can find</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <input
+              id="f-autofill-url"
+              type="url"
+              placeholder="https://www.realtor.ca/real-estate/..."
+              value={autoUrl}
+              onChange={(e) => setAutoUrl(e.target.value)}
+              style={{ flex: 1 }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAutofill(); } }}
+            />
+            <button type="button" className="btn" onClick={handleAutofill} disabled={autoStatus === "loading" || !autoUrl.trim()}>
+              {autoStatus === "loading" ? "Fetching…" : "Auto-fill"}
+            </button>
+          </div>
+          {autoMessage && <p className={`autofill-msg ${autoStatus}`}>{autoMessage}</p>}
+        </div>
+      )}
 
       {flags.length > 0 && (
         <div className="flags-summary">
