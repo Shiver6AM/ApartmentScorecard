@@ -97,7 +97,7 @@ export function DetailCard({ listing, isNew, workNeighborhood, weights, onSave, 
 
       {isNew && (
         <div className="autofill-box">
-          <label htmlFor="f-autofill-url">Paste a realtor.ca or rentals.ca link to auto-fill what it can find</label>
+          <label htmlFor="f-autofill-url">Paste a listing link (realtor.ca, rentals.ca, Zolo, Condos.ca, etc.) to auto-fill what it can find</label>
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <input
               id="f-autofill-url"

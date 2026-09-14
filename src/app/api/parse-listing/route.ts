@@ -2,13 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 import { Listing } from "@/lib/types";
 
-// Best-effort auto-fill: given a realtor.ca or rentals.ca listing URL, fetch the page
-// server-side (avoids browser CORS) and pull out whatever fields we can find. Real estate
-// sites change their markup often and some render listing data client-side via JS that a
-// plain fetch can't see, so this deliberately layers a few strategies — structured JSON-LD
-// first (most reliable when present), then Open Graph / meta text, then loose regex over
-// that text — and simply returns fewer fields rather than failing when a layer comes up
-// empty. The user always reviews and fills in the rest by hand.
+// Best-effort auto-fill: given a listing URL (any site — realtor.ca, rentals.ca, Zolo,
+// Condos.ca, etc.), fetch the page server-side (avoids browser CORS) and pull out whatever
+// fields we can find. Real estate sites change their markup often, some render listing data
+// client-side via JS a plain fetch can't see, and some (realtor.ca especially) actively block
+// automated requests — so this deliberately layers a few extraction strategies (structured
+// JSON-LD first, then Open Graph/meta text, then loose regex over that text) and simply
+// returns fewer fields, or a clear error, rather than crashing when a site doesn't cooperate.
+// The user always reviews and fills in the rest by hand.
+
+const PRIVATE_HOST_RE =
+  /^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|::1$|\[::1\])|^172\.(1[6-9]|2\d|3[01])\./i;
+
+// Basic SSRF guard: this route fetches whatever URL a (unauthenticated) visitor supplies, so
+// refuse anything pointing at loopback/private/link-local addresses rather than letting the
+// server be used to probe internal network services.
+function isBlockedHost(hostname: string): boolean {
+  return PRIVATE_HOST_RE.test(hostname) || hostname.endsWith(".local");
+}
 
 type ParsedFields = Partial<Listing>;
 
@@ -140,15 +151,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "That doesn't look like a valid URL." }, { status: 400 });
   }
 
-  const host = parsedUrl.hostname.replace(/^www\./, "");
-  const isRealtor = host === "realtor.ca";
-  const isRentals = host === "rentals.ca";
-  if (!isRealtor && !isRentals) {
-    return NextResponse.json({
-      ok: false,
-      error: "Auto-fill currently supports realtor.ca and rentals.ca links only — paste one of those, or fill the form in by hand.",
-    });
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    return NextResponse.json({ ok: false, error: "Only http/https listing links are supported." }, { status: 400 });
   }
+  if (isBlockedHost(parsedUrl.hostname)) {
+    return NextResponse.json({ ok: false, error: "That URL isn't allowed." }, { status: 400 });
+  }
+
+  const host = parsedUrl.hostname.replace(/^www\./, "");
+  const isRentals = host === "rentals.ca";
 
   let html: string;
   try {
@@ -255,7 +266,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: false,
       error:
-        "Couldn't find any usable details on that page — it may load its listing data with JavaScript after the page loads, which this can't see, or the listing may have expired. You'll need to fill the form in by hand this time.",
+        "Couldn't find any usable details on that page — it may load its listing data with JavaScript after the page loads (which this can't see), the site may block automated requests, or the listing may have expired. You'll need to fill the form in by hand this time.",
     });
   }
 

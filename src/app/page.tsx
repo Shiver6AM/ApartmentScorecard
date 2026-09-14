@@ -122,7 +122,7 @@ export default function Home() {
       </p>
 
       <div className="howto">
-        <b>Add a listing</b> with the button below — paste in details from a realtor.ca or rentals.ca page.
+        <b>Add a listing</b> with the button below — paste in a listing URL to try auto-fill, or enter details by hand.
       </div>
       {dbError && (
         <div className="banner">
